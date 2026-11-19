@@ -1,5 +1,5 @@
 export const CONFIG = {
-  API_URL: 'https://script.google.com/macros/s/AKfycbzggGIG_Kc0rq4VQUJEcAYzPUKwx3OnU4ljCFtwp5eCb4elyRxfJ8UewlFJRW52kBBe/exec',
+  API_URL: 'https://script.google.com/macros/s/AKfycbxoCOXdF45w2Eg6zQ6arVcb8CM14qwN7LygwuzDSbtztRP-EMWqEcFUu7O0sN7fCKF40w/exec',
   CART_STORAGE_KEY: 'DORRY_CART_V1',
   HOTLINE: '037 229 2222',
   GOOGLE_ADS_CONVERSION_ID: 'AW-18231002763/OoAbCK36rr4cEIuNnPVD'
