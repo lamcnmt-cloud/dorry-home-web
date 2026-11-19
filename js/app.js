@@ -8,6 +8,7 @@ let CURRENT_PD = null;
 let SELECTED_COLOR = null;
 let SELECTED_SIZE = null;
 let heroTimer = null;
+let pdCountdownTimer = null;
 let HAS_HANDLED_INITIAL_URL = false;
 
 function initStaticUI() {
@@ -98,7 +99,6 @@ function showApiError(msg) {
     </div>`;
 }
 
-// Tự động kiểm tra tham số ?product=... trên đường dẫn để mở đúng sản phẩm
 function checkProductFromUrl() {
   if (HAS_HANDLED_INITIAL_URL) return;
   const params = new URLSearchParams(window.location.search);
@@ -242,7 +242,9 @@ function openProductModal(id, updateUrl = true) {
 
   if (window.fbq) window.fbq('track', 'ViewContent', { content_name: p.name, value: p.priceSale, currency: 'VND' });
   renderProductModalContent();
-  document.getElementById('productModal').classList.add('open');
+  const modal = document.getElementById('productModal');
+  modal.classList.add('open');
+  modal.querySelector('.modal-box').scrollTop = 0;
 }
 
 function copyProductShareLink(slug) {
@@ -256,11 +258,71 @@ function copyProductShareLink(slug) {
   });
 }
 
+// Đọc chuỗi đánh giá từ Cột T (dạng: Tên|Số sao|Nội dung)
+function parseProductReviews(rawReviews) {
+  if (!rawReviews) return [];
+  if (Array.isArray(rawReviews)) return rawReviews;
+  return String(rawReviews).split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {
+    const parts = line.split('|');
+    return {
+      author: (parts[0] || 'Khách hàng Dorry').trim(),
+      rating: Math.min(5, Math.max(1, parseInt(parts[1] || '5', 10) || 5)),
+      comment: (parts.slice(2).join('|') || '').trim()
+    };
+  }).filter(r => r.comment);
+}
+
+// Tìm các sản phẩm liên quan từ Cột V (dạng: 6, 7, 8, 9...)
+function getRelatedProducts(p) {
+  const raw = p.relatedProducts || p.related || '';
+  const all = STORE_DATA.products || [];
+  if (!raw) return all.filter(item => String(item.id) !== String(p.id)).slice(0, 4);
+
+  const ids = Array.isArray(raw)
+    ? raw.map(x => String(x).trim())
+    : String(raw).split(/[,;|]+/).map(x => x.trim()).filter(Boolean);
+
+  const matched = ids.map(id => all.find(item => String(item.id) === id || String(item.slug) === id)).filter(Boolean);
+  return matched.length ? matched.slice(0, 4) : all.filter(item => String(item.id) !== String(p.id)).slice(0, 4);
+}
+
+// Khởi chạy đồng hồ đếm ngược khuyến mãi từ Cột U
+function startPdCountdown(rawEnd) {
+  if (pdCountdownTimer) clearInterval(pdCountdownTimer);
+  const box = document.getElementById('pdCountdownBox');
+  if (!box || !rawEnd) return;
+
+  let targetTime = Date.parse(rawEnd);
+  if (isNaN(targetTime)) {
+    const hours = parseFloat(rawEnd);
+    targetTime = Date.now() + ((hours > 0 ? hours : 4) * 3600 * 1000);
+  }
+
+  const tick = () => {
+    const diff = targetTime - Date.now();
+    if (diff <= 0) {
+      box.style.display = 'none';
+      clearInterval(pdCountdownTimer);
+      return;
+    }
+    const h = String(Math.floor(diff / 3600000)).padStart(2, '0');
+    const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2, '0');
+    const s = String(Math.floor((diff % 60000) / 1000)).padStart(2, '0');
+    const timeEl = document.getElementById('pdCountdownText');
+    if (timeEl) timeEl.textContent = `${h} giờ : ${m} phút : ${s} giây`;
+  };
+  tick();
+  pdCountdownTimer = setInterval(tick, 1000);
+}
+
 function renderProductModalContent() {
   const p = CURRENT_PD;
   const activeImg = SELECTED_COLOR?.image || p.image;
   const activePrice = SELECTED_SIZE?.price > 0 ? SELECTED_SIZE.price : p.priceSale;
   const productSlug = p.slug || p.shortUrl || p.id;
+  const reviews = parseProductReviews(p.reviews);
+  const relatedList = getRelatedProducts(p);
+  const hasCountdown = Boolean(p.countdown || p.promoEnd);
 
   document.getElementById('productModalBody').innerHTML = `
     <div>
@@ -270,10 +332,15 @@ function renderProductModalContent() {
     </div>
     <div>
       <h2 style="font-family:var(--font-display);font-size:26px;margin-bottom:8px;">${p.name}</h2>
-      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:16px;">
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:14px;">
         <span style="font-size:24px;font-weight:700;color:var(--accent-terracotta);">${formatVND(activePrice)}</span>
         ${p.priceOriginal > activePrice ? `<span class="price-orig">${formatVND(p.priceOriginal)}</span>` : ''}
       </div>
+      ${hasCountdown ? `
+        <div id="pdCountdownBox" style="background:linear-gradient(135deg,#fff5f2,#ffece6);border:1px solid rgba(200,109,81,0.35);padding:10px 14px;border-radius:12px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;font-size:13px;">
+          <span style="color:var(--accent-terracotta);font-weight:700;">🔥 Ưu đãi kết thúc sau:</span>
+          <strong id="pdCountdownText" style="color:#b91c1c;font-variant-numeric:tabular-nums;">-- : -- : --</strong>
+        </div>` : ''}
       ${p.colors.length ? `
         <div style="margin-bottom:14px;">
           <strong style="font-size:13px;">Màu sắc: <span style="color:var(--accent-terracotta);">${SELECTED_COLOR.name}</span></strong>
@@ -293,7 +360,40 @@ function renderProductModalContent() {
         <button class="btn btn-primary" ${!p.inStock ? 'disabled' : ''} onclick="handleAddCart(true)">⚡ Mua ngay</button>
       </div>
       <div style="background:var(--bg-primary);padding:14px;border-radius:12px;font-size:13.5px;white-space:pre-line;max-height:200px;overflow-y:auto;">${p.details || p.shortDesc}</div>
-    </div>`;
+    </div>
+
+    ${reviews.length ? `
+      <div style="grid-column:1/-1;border-top:1px solid var(--border-soft);padding-top:20px;">
+        <h3 style="font-size:16px;margin-bottom:12px;">⭐ Đánh giá từ khách hàng đã mua (${reviews.length})</h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;">
+          ${reviews.map(r => `
+            <div style="background:var(--bg-primary);padding:12px 14px;border-radius:12px;border:1px solid var(--border-soft);font-size:13px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                <strong>${r.author}</strong>
+                <span style="color:#f59e0b;">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span>
+              </div>
+              <p style="color:var(--text-muted);line-height:1.5;">${r.comment}</p>
+            </div>`).join('')}
+        </div>
+      </div>` : ''}
+
+    ${relatedList.length ? `
+      <div style="grid-column:1/-1;border-top:1px solid var(--border-soft);padding-top:20px;">
+        <h3 style="font-size:16px;margin-bottom:14px;">✨ Sản phẩm gợi ý mua kèm</h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:14px;">
+          ${relatedList.map(rel => `
+            <div onclick="openProductModal('${rel.id}')" style="background:var(--bg-primary);border-radius:12px;overflow:hidden;border:1px solid var(--border-soft);cursor:pointer;">
+              <img src="${rel.image}" alt="${rel.name}" style="width:100%;aspect-ratio:1/1;object-fit:cover;" />
+              <div style="padding:10px;">
+                <div style="font-size:13px;font-weight:600;margin-bottom:4px;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;">${rel.name}</div>
+                <div style="font-size:13.5px;font-weight:700;color:var(--accent-terracotta);">${formatVND(rel.priceSale)}</div>
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>` : ''}
+  `;
+
+  if (hasCountdown) startPdCountdown(p.countdown || p.promoEnd);
 }
 
 function handleAddCart(buyNow) {
@@ -333,6 +433,7 @@ function openPolicyModal(slug) {
 }
 
 function closeProductModal() {
+  if (pdCountdownTimer) clearInterval(pdCountdownTimer);
   document.getElementById('productModal').classList.remove('open');
   const newUrl = new URL(window.location.href);
   if (newUrl.searchParams.has('product')) {
