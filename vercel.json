@@ -1,0 +1,9 @@
+{
+  "rewrites": [
+    { "source": "/p/:slug", "destination": "/index.html" },
+    { "source": "/san-pham/:slug", "destination": "/index.html" },
+    { "source": "/tiktok", "destination": "/index.html" },
+    { "source": "/google", "destination": "/index.html" },
+    { "source": "/facebook", "destination": "/index.html" }
+  ]
+}

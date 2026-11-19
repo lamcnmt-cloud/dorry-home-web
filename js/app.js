@@ -8,6 +8,7 @@ let CURRENT_PD = null;
 let SELECTED_COLOR = null;
 let SELECTED_SIZE = null;
 let heroTimer = null;
+let HAS_HANDLED_INITIAL_URL = false;
 
 function initStaticUI() {
   document.getElementById('faqList').innerHTML = FAQ_ITEMS.map((item, i) => `
@@ -41,7 +42,6 @@ function goHeroSlide(idx) {
 }
 
 function loadStoreData() {
-  // 1. Hiển thị ngay dữ liệu từ bộ nhớ đệm (0.1 giây) nếu đã từng truy cập
   const cachedRaw = localStorage.getItem(CACHE_KEY);
   if (cachedRaw) {
     try {
@@ -53,7 +53,6 @@ function loadStoreData() {
     } catch (e) {}
   }
 
-  // 2. Âm thầm gọi Google Apps Script ở chế độ nền để đồng bộ giá & tồn kho mới nhất
   const scriptId = 'dorryJsonpScript';
   const oldScript = document.getElementById(scriptId);
   if (oldScript) oldScript.remove();
@@ -99,6 +98,25 @@ function showApiError(msg) {
     </div>`;
 }
 
+// Tự động kiểm tra tham số ?product=... trên đường dẫn để mở đúng sản phẩm
+function checkProductFromUrl() {
+  if (HAS_HANDLED_INITIAL_URL) return;
+  const params = new URLSearchParams(window.location.search);
+  const queryProduct = (params.get('product') || params.get('sp') || '').trim().toLowerCase();
+  if (!queryProduct) return;
+
+  const found = (STORE_DATA.products || []).find(p => {
+    const pSlug = String(p.slug || p.shortUrl || '').trim().toLowerCase();
+    const pId = String(p.id || '').trim().toLowerCase();
+    return pSlug === queryProduct || pId === queryProduct;
+  });
+
+  if (found) {
+    HAS_HANDLED_INITIAL_URL = true;
+    openProductModal(found.id, false);
+  }
+}
+
 function renderAllSections() {
   const products = STORE_DATA.products || [];
 
@@ -130,6 +148,8 @@ function renderAllSections() {
         <p class="news-excerpt">${n.excerpt}</p>
       </div>
     </article>`).join('');
+
+  checkProductFromUrl();
 }
 
 function renderProductCard(p) {
@@ -205,27 +225,48 @@ function changeCatalogPage(p) {
   applyCatalogFilters();
 }
 
-function openProductModal(id) {
-  const p = (STORE_DATA.products || []).find(item => item.id === id);
+function openProductModal(id, updateUrl = true) {
+  const p = (STORE_DATA.products || []).find(item => String(item.id) === String(id));
   if (!p) return;
   CURRENT_PD = p;
   SELECTED_COLOR = p.colors?.length ? p.colors[0] : null;
   SELECTED_SIZE = p.sizes?.length ? p.sizes[0] : null;
+
+  const productSlug = p.slug || p.shortUrl || p.id;
+  if (updateUrl && productSlug) {
+    const newUrl = new URL(window.location.href);
+    newUrl.searchParams.set('product', productSlug);
+    window.history.replaceState({}, '', newUrl.toString());
+  }
+  document.title = `${p.name} | Dorry Home`;
 
   if (window.fbq) window.fbq('track', 'ViewContent', { content_name: p.name, value: p.priceSale, currency: 'VND' });
   renderProductModalContent();
   document.getElementById('productModal').classList.add('open');
 }
 
+function copyProductShareLink(slug) {
+  const shareUrl = `${window.location.origin}/?product=${encodeURIComponent(slug)}`;
+  navigator.clipboard.writeText(shareUrl).then(() => {
+    const btn = document.getElementById('copyPdLinkBtn');
+    if (btn) {
+      btn.innerHTML = '✅ Đã copy link sản phẩm!';
+      setTimeout(() => { btn.innerHTML = '🔗 Copy link sản phẩm này'; }, 2000);
+    }
+  });
+}
+
 function renderProductModalContent() {
   const p = CURRENT_PD;
   const activeImg = SELECTED_COLOR?.image || p.image;
   const activePrice = SELECTED_SIZE?.price > 0 ? SELECTED_SIZE.price : p.priceSale;
+  const productSlug = p.slug || p.shortUrl || p.id;
 
   document.getElementById('productModalBody').innerHTML = `
     <div>
       <img src="${activeImg}" alt="${p.name}" style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:16px;border:1px solid var(--border-soft);" />
       ${p.videoUrl ? `<a href="${p.videoUrl}" target="_blank" class="btn btn-secondary" style="width:100%;margin-top:12px;"><i class="fab fa-youtube" style="color:red;"></i> Xem Video Review Thực Tế</a>` : ''}
+      <button id="copyPdLinkBtn" onclick="copyProductShareLink('${productSlug}')" class="btn btn-secondary" style="width:100%;margin-top:8px;font-size:13px;">🔗 Copy link sản phẩm này</button>
     </div>
     <div>
       <h2 style="font-family:var(--font-display);font-size:26px;margin-bottom:8px;">${p.name}</h2>
@@ -291,12 +332,21 @@ function openPolicyModal(slug) {
   document.getElementById('contentModal').classList.add('open');
 }
 
-function closeProductModal() { document.getElementById('productModal').classList.remove('open'); }
+function closeProductModal() {
+  document.getElementById('productModal').classList.remove('open');
+  const newUrl = new URL(window.location.href);
+  if (newUrl.searchParams.has('product')) {
+    newUrl.searchParams.delete('product');
+    window.history.replaceState({}, '', newUrl.toString());
+  }
+  document.title = 'Dorry Home - Chăn Ga Gối Nệm Cao Cấp | 13 Năm Uy Tín';
+}
+
 function closeContentModal() { document.getElementById('contentModal').classList.remove('open'); }
 
 Object.assign(window, {
   goHeroSlide, setCategoryFilter, setPriceFilter, applyCatalogFilters, changeCatalogPage,
-  openProductModal, closeProductModal,
+  openProductModal, closeProductModal, copyProductShareLink,
   selectPdColor: idx => { SELECTED_COLOR = CURRENT_PD.colors[idx]; renderProductModalContent(); },
   selectPdSize: idx => { SELECTED_SIZE = CURRENT_PD.sizes[idx]; renderProductModalContent(); },
   handleAddCart, updateCartQty, openCartDrawer, closeCartDrawer,
