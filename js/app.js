@@ -1,8 +1,9 @@
 import { CONFIG, FAQ_ITEMS } from './config.js';
 import { formatVND, addItemToCart, updateCartQty, renderCartUI, openCartDrawer, closeCartDrawer, selectPayment, submitOrder } from './store.js';
 
+const CACHE_KEY = 'DORRY_STORE_CACHE_V1';
 let STORE_DATA = { products: [], news: [], policies: [], hero: null };
-let FILTER_STATE = { search: '', category: 'ALL', minPrice: 0, maxPrice: null, sort: 'default', page: 1, perPage: 24 };
+let FILTER_STATE = { search: '', category: 'ALL', minPrice: 0, maxPrice: null, sort: 'default', page: 1, perPage: 12 };
 let CURRENT_PD = null;
 let SELECTED_COLOR = null;
 let SELECTED_SIZE = null;
@@ -40,15 +41,32 @@ function goHeroSlide(idx) {
 }
 
 function loadStoreData() {
+  // 1. Hiển thị ngay dữ liệu từ bộ nhớ đệm (0.1 giây) nếu đã từng truy cập
+  const cachedRaw = localStorage.getItem(CACHE_KEY);
+  if (cachedRaw) {
+    try {
+      const parsed = JSON.parse(cachedRaw);
+      if (parsed && parsed.products && parsed.products.length) {
+        STORE_DATA = parsed;
+        renderAllSections();
+      }
+    } catch (e) {}
+  }
+
+  // 2. Âm thầm gọi Google Apps Script ở chế độ nền để đồng bộ giá & tồn kho mới nhất
   const scriptId = 'dorryJsonpScript';
   const oldScript = document.getElementById(scriptId);
   if (oldScript) oldScript.remove();
 
   window.handleDorryData = function (json) {
     if (json.status === 'success') {
-      STORE_DATA = json;
-      renderAllSections();
-    } else {
+      const newStr = JSON.stringify(json);
+      if (newStr !== cachedRaw) {
+        STORE_DATA = json;
+        localStorage.setItem(CACHE_KEY, newStr);
+        renderAllSections();
+      }
+    } else if (!cachedRaw) {
       showApiError(json.message);
     }
   };
@@ -59,8 +77,16 @@ function loadStoreData() {
   script.onerror = function () {
     fetch(CONFIG.API_URL, { method: 'GET', redirect: 'follow' })
       .then(res => res.json())
-      .then(json => (json.status === 'success' ? ((STORE_DATA = json), renderAllSections()) : showApiError(json.message)))
-      .catch(err => showApiError(err.toString()));
+      .then(json => {
+        if (json.status === 'success') {
+          STORE_DATA = json;
+          localStorage.setItem(CACHE_KEY, JSON.stringify(json));
+          renderAllSections();
+        } else if (!cachedRaw) {
+          showApiError(json.message);
+        }
+      })
+      .catch(err => { if (!cachedRaw) showApiError(err.toString()); });
   };
   document.body.appendChild(script);
 }
@@ -98,7 +124,7 @@ function renderAllSections() {
 
   document.getElementById('newsGrid').innerHTML = (STORE_DATA.news || []).slice(0, 6).map(n => `
     <article class="news-card" onclick="openArticleModal('${n.id}')">
-      <img class="news-thumb" src="${n.image || 'https://w.ladicdn.com/5cdb79b830dba94fe2f5f09b/ktn-aigl-1263_7-20260507184704-64ews.jpg'}" alt="${n.title}" />
+      <img class="news-thumb" loading="lazy" decoding="async" src="${n.image || 'https://w.ladicdn.com/5cdb79b830dba94fe2f5f09b/ktn-aigl-1263_7-20260507184704-64ews.jpg'}" alt="${n.title}" />
       <div class="news-body">
         <h3 class="news-title">${n.title}</h3>
         <p class="news-excerpt">${n.excerpt}</p>
@@ -115,7 +141,7 @@ function renderProductCard(p) {
     <div class="aigl-molecule-02-media-card">
       <div class="card-media" onclick="openProductModal('${p.id}')">
         <div class="card-badges">${badgeHtml}</div>
-        <img src="${p.image}" alt="${p.name}" loading="lazy" />
+        <img src="${p.image}" alt="${p.name}" loading="lazy" decoding="async" />
         ${p.videoUrl ? `<span class="video-pill"><i class="fas fa-play"></i> Video</span>` : ''}
       </div>
       <div class="card-body">
